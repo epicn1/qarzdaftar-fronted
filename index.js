@@ -1,110 +1,145 @@
-// DOM Elementlarini tanlab olish
-const debtForm = document.getElementById('debtForm');
-const nameInput = document.getElementById('name');
-const amountInput = document.getElementById('amount');
-const debtList = document.getElementById('debtList');
-const totalAmountEl = document.getElementById('totalAmount');
-const searchInput = document.getElementById('search');
+document.addEventListener('DOMContentLoaded', () => {
+    const debtForm = document.getElementById('debtForm');
+    const nameInput = document.getElementById('name');
+    const amountInput = document.getElementById('amount');
+    const debtList = document.getElementById('debtList');
+    const trashList = document.getElementById('trashList');
+    const totalAmountDisplay = document.getElementById('totalAmount');
+    const searchInput = document.getElementById('search');
+    const exportBtn = document.getElementById('exportBtn');
 
-// LocalStorage'dan ma'lumotlarni o'qish yoki bo'sh massiv olish
-let debts = JSON.parse(localStorage.getItem('debts')) || [];
+    let debts = JSON.parse(localStorage.getItem('debts')) || [];
+    let trash = JSON.parse(localStorage.getItem('trash')) || [];
 
-// Raqamlarni chiroyli formatda chiqarish (masalan: 100 000)
-function formatMoney(amount) {
-    return Number(amount).toLocaleString('uz-UZ') + ' UZS';
-}
+    // Formani yuborish
+    debtForm.addEventListener('submit', (e) => {
+        e.preventDefault();
+        
+        const name = nameInput.value.trim();
+        const amount = parseFloat(amountInput.value);
 
-// Umumiy summani hisoblash va yangilash
-function updateSummary() {
-    const total = debts.reduce((sum, item) => sum + Number(item.amount), 0);
-    totalAmountEl.textContent = formatMoney(total);
-}
+        // Ismda faqat harf bo'lishini tekshirish (ixtiyoriy)
+        if (!/^[a-zA-Z\s'ʻʼ]+$/.test(name)) {
+            alert("Iltimos, ismga faqat harf yozing!");
+            return;
+        }
 
-// Xavfsizlik uchun (HTML Injection oldini olish) - TO'G'RILANDI
-function escapeHTML(str) {
-    const div = document.createElement('div');
-    div.innerText = str;
-    return div.innerHTML;
-}
+        const newDebt = {
+            id: Date.now(),
+            name: name,
+            amount: amount,
+            date: new Date().toLocaleDateString(),
+        };
 
-// Qarzlar ro'yxatini ekranga chizish
-function renderDebts(filterText = '') {
-    debtList.innerHTML = '';
-
-    const filteredDebts = debts.filter(item => 
-        item.name.toLowerCase().includes(filterText.toLowerCase())
-    );
-
-    if (filteredDebts.length === 0) {
-        debtList.innerHTML = `<li class="empty-msg">Hech qanday qarz topilmadi.</li>`;
-        return;
-    }
-
-    filteredDebts.forEach(debt => {
-        const li = document.createElement('li');
-        li.className = 'debt-item';
-        li.innerHTML = `
-            <div class="debt-info">
-                <div class="debt-name">${escapeHTML(debt.name)}</div>
-                <div class="debt-date">${debt.date}</div>
-            </div>
-            <div class="debt-actions">
-                <div class="debt-amount">${formatMoney(debt.amount)}</div>
-                <button class="btn-delete" onclick="deleteDebt('${debt.id}')" title="O'chirish">
-                    <i class="fa-solid fa-trash-can"></i>
-                </button>
-            </div>
-        `;
-        debtList.appendChild(li);
+        debts.push(newDebt);
+        saveAndRender();
+        debtForm.reset();
     });
-}
 
-// Qarz qo'shish hodisasi - TO'G'RILANDI
-debtForm.addEventListener('submit', (e) => {
-    e.preventDefault();
-
-    const name = nameInput.value.trim();
-    const amount = amountInput.value.trim();
-
-    if (!name || !amount) return;
-
-    // Hozirgi sanani olish
-    const now = new Date();
-    const dateString = now.toLocaleDateString('uz-UZ') + ' ' + now.toLocaleTimeString('uz-UZ', {hour: '2-digit', minute:'2-digit'});
-
-    const newDebt = {
-        id: Date.now().toString(),
-        name: name,
-        amount: parseFloat(amount),
-        date: dateString
+    // O'chirish (Korzinkaga o'tkazish)
+    window.moveToTrash = (id) => {
+        const itemIndex = debts.findIndex(d => d.id === id);
+        const item = debts.splice(itemIndex, 1)[0];
+        trash.push(item);
+        saveAndRender();
     };
 
-    debts.push(newDebt);
-    saveData();
-    
-    // Formani tozalash
-    debtForm.reset();
-    nameInput.focus();
+    // Qayta tiklash
+    window.restoreDebt = (id) => {
+        const itemIndex = trash.findIndex(t => t.id === id);
+        const item = trash.splice(itemIndex, 1)[0];
+        debts.push(item);
+        saveAndRender();
+    };
+
+    // Butunlay o'chirish
+    window.permanentlyDelete = (id) => {
+        trash = trash.filter(t => t.id !== id);
+        saveAndRender();
+    };
+
+    // Qidiruv
+    searchInput.addEventListener('input', () => {
+        render();
+    });
+
+    // Excel (CSV) yuklab olish funksiyasi
+    exportBtn.addEventListener('click', () => {
+        if (debts.length === 0) {
+            alert("Eksport qilish uchun ma'lumot topilmadi!");
+            return;
+        }
+
+        // Excelda o'zbekcha harflar (o', g') to'g'ri chiqishi uchun BOM (\ufeff) qo'shiladi
+        let csvContent = "\ufeff"; 
+        csvContent += "Ism,Summa (UZS),Qo'shilgan sana\n";
+
+        debts.forEach(debt => {
+            const name = `"${debt.name.replace(/"/g, '""')}"`; // Ism ichida vergul bo'lsa xato bo'lmasligi uchun
+            csvContent += `${name},${debt.amount},${debt.date}\n`;
+        });
+
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.setAttribute("href", url);
+        link.setAttribute("download", `qarzlar_${new Date().toLocaleDateString()}.csv`);
+        link.style.visibility = 'hidden';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    });
+
+    function saveAndRender() {
+        localStorage.setItem('debts', JSON.stringify(debts));
+        localStorage.setItem('trash', JSON.stringify(trash));
+        render();
+    }
+
+    function render() {
+        const searchTerm = searchInput.value.toLowerCase();
+        
+        // Ro'yxatni tozalash
+        debtList.innerHTML = '';
+        trashList.innerHTML = '';
+
+        let total = 0;
+
+        // Qarzdorlarni chiqarish
+        debts.filter(d => d.name.toLowerCase().includes(searchTerm)).forEach(debt => {
+            total += debt.amount;
+
+            debtList.innerHTML += `
+                <li class="debt-item">
+                    <div class="debt-info">
+                        <b>${debt.name}</b>
+                        <span>${debt.amount.toLocaleString()} UZS | Qo'shilgan: ${debt.date}</span>
+                    </div>
+                    <div class="actions">
+                        <button class="btn-delete" onclick="moveToTrash(${debt.id})"><i class="fa-solid fa-trash-can"></i></button>
+                    </div>
+                </li>
+            `;
+        });
+
+        // Korzinkani chiqarish
+        trash.forEach(item => {
+            trashList.innerHTML += `
+                <div class="debt-item trash-item">
+                    <div class="debt-info">
+                        <b>${item.name}</b>
+                        <span>${item.amount.toLocaleString()} UZS</span>
+                    </div>
+                    <div class="actions">
+                        <button class="btn-restore" onclick="restoreDebt(${item.id})"><i class="fa-solid fa-rotate-left"></i></button>
+                        <button class="btn-delete" onclick="permanentlyDelete(${item.id})"><i class="fa-solid fa-xmark"></i></button>
+                    </div>
+                </div>
+            `;
+        });
+
+        totalAmountDisplay.innerText = `${total.toLocaleString()} UZS`;
+    }
+
+    render(); // Birinchi marta yuklanganda
 });
-
-// Qarzni o'chirish funksiyasi
-function deleteDebt(id) {
-    debts = debts.filter(item => item.id !== id);
-    saveData();
-}
-
-// Qidiruv tizimi
-searchInput.addEventListener('input', (e) => {
-    renderDebts(e.target.value);
-});
-
-// Ma'lumotlarni saqlash va yangilash
-function saveData() {
-    localStorage.setItem('debts', JSON.stringify(debts));
-    renderDebts(searchInput.value);
-    updateSummary();
-}
-
-// Dasturni ilk bor ishga tushirish
-updateSummary();
-renderDebts();
